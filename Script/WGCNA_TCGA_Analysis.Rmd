@@ -1,0 +1,40 @@
+---
+title: "WGCNA analysis of HNSCC TCGA data"
+author: "Bernard Lee"
+date: "2020-10-20"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+#### Load library
+```{r}
+library(tidyverse)
+```
+
+#### Step 1: Preprocessing of TCGA RNAseq data
+```{r}
+RNAseq <- HNSCC_CLEAN
+RNAseq <- RNAseq[apply(RNAseq, 1, function(x) sum(x == 0)) < ncol(RNAseq)*0.8, ]
+RNAseq_metadata <- HNSCC_metadata
+
+# Normalization
+library(limma)
+RNAseq_voom <- voom(RNAseq)$E
+
+# Transpose matrix to correlate genes
+WGCNA_matrix <- t(RNAseq_voom[order(apply(RNAseq_voom, 1, mad), decreasing = TRUE)[1:5000], ])
+```
+
+#### Step 2: Construction of co-expression network
+```{r}
+# similarity measure between gene profiles: biweight midcorrelation
+library(WGCNA)
+s <- abs(bicor(WGCNA_matrix))
+```
+
+
+
+
+
+
