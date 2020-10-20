@@ -1,0 +1,138 @@
+---
+title: "New vaccine target identification"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+#### Load library
+```{r}
+library(tidyverse)
+```
+
+#### Load data
+```{r}
+HNSCC_dat <- read_delim("/Users/mac/Desktop/gdac.broadinstitute.org_HNSC.Merge_rnaseqv2__illuminahiseq_rnaseqv2__unc_edu__Level_3__RSEM_genes__data.Level_3.2016012800.0.0/HNSC.rnaseqv2__illuminahiseq_rnaseqv2__unc_edu__Level_3__RSEM_genes__data.data.txt", delim = "\t")
+
+# Choose index with raw_count
+idx <- which(HNSCC_dat[1, ] == "raw_count")
+
+# Clean HNSCC data
+HNSCC_dat <- HNSCC_dat[, c(1, idx)]
+
+# Save to local workstation to further clean the data
+write_delim(HNSCC_dat, "/Users/mac/OneDrive - Cancer Research Malaysia/Kuepeng/2020/New_targets/TCGA_HNSCC/TCGA_HNSCC_dat.txt", delim = "\t")
+```
+
+#### Clean HNSCC data
+```{r}
+HNSCC_CLEAN <- read.delim("/Users/mac/OneDrive - Cancer Research Malaysia/Kuepeng/2020/New_targets/TCGA_HNSCC/_Working_Copy/WC_TCGA_HNSCC_dat.txt", row.names = 1, check.names = FALSE)
+
+# Metadata
+HNSCC_metadata <- read.delim("/Users/mac/OneDrive - Cancer Research Malaysia/Kuepeng/2020/New_targets/TCGA_HNSCC/_Working_Copy/WC_TCGA_HNSCC_metadata.txt")
+```
+
+#### Differential analysis using edgeR
+```{r}
+# load package
+library(edgeR)
+
+# Starts
+d0 <- HNSCC_CLEAN # original gene number is 20502
+
+# Remove data with zero counts
+cutoff <- 1
+drop <- which(apply(cpm(d0), 1, max) < cutoff)
+d <- d0[-drop,] 
+dim(d) # number of genes left 18292
+
+
+# Filter low expressed genes
+d0 <- DGEList(d)
+keep.exprs <- filterByExpr(d0)
+d0 <- d0[keep.exprs, keep.lib.sizes = FALSE]
+summary(keep.exprs) # number of genes 14634
+
+# Normalization
+d0 <- calcNormFactors(d0, method = "TMM")
+tmm <- cpm(d0, log = TRUE)
+#write.table(tmm, "/Users/mac/OneDrive - Cancer Research Malaysia/Kuepeng/2020/New_targets/TCGA_HNSCC/_Working_Copy/TCGA_HNSCC_GeneCounts_Normalized.txt", quote = FALSE, sep = "\t")
+
+# Design matrix with the metadata file
+f <- factor(HNSCC_metadata$Phenotype)
+design <- model.matrix(~0 + f)
+head(design)
+colnames(design) <- c("Early_Stage", "Late_Stage")
+design
+
+# Calculate dispersion
+y <- estimateDisp(d0, design, robust = TRUE)
+y$common.dispersion
+
+# Quasi-likehood dispersion
+fit <- glmQLFit(y, design, robust = TRUE)
+
+# Differential gene expression
+con <- makeContrasts(Late_Stage - Early_Stage, levels = design)
+qlf <- glmQLFTest(fit, contrast = con)
+topTags(qlf)
+
+# TREAT
+tr <- glmTreat(fit, contrast = con, lfc = log2(1.2))
+topTags(tr)
+is.de <- decideTestsDGE(tr, adjust.method = "BH")
+summary(is.de)
+
+# Write out the output
+tab <- topTags(tr, n = Inf, adjust.method = "BH")
+#write.table(tab$table, file="/Users/mac/OneDrive - Cancer Research Malaysia/Kuepeng/2020/New_targets/TCGA_HNSCC/_Working_Copy/Output/TCGA_HNSCC_LateStage_vs_EarlyStage.txt", sep = '\t', quote = FALSE, row.names = TRUE)
+
+# DEG analysis
+# Read in the files
+GSE <- read.delim("/Users/mac/OneDrive - Cancer Research Malaysia/Kuepeng/2020/New_targets/TCGA_HNSCC/_Working_Copy/Output/TCGA_HNSCC_LateStage_vs_EarlyStage.txt", header = TRUE, row.names = 1)
+head(GSE)
+GSE$lgtranspvalue <- -log10(GSE$PValue)
+head(GSE)
+
+par(pch = 16)
+par(pty = "s")
+
+# Plotting the figures
+plot(GSE$logFC, GSE$lgtranspvalue, main='TCGA HNSCC Late Stage (n = 347) vs Early Stage (n = 101)', xlab=expression('lg'[2]*'FC'), ylab=expression('-lg'[10]*'pvalue'),cex.lab=1.2)
+with(subset(GSE, logFC < 0 & lgtranspvalue >= (2/-logFC)), points(logFC,lgtranspvalue, col = "red"))
+with(subset(GSE, logFC > 0 & lgtranspvalue >= (2/logFC)), points(logFC,lgtranspvalue, col = "blue"))
+
+# Add legend
+#legend("bottomright",legend=c(expression(paste('DOWN: lg'[2]*'FC<0 & -lg'[10]*'pvalue>=(2/-lg'[2]*'FC)')), expression(paste('UP: lg'[2]*'FC>0 & -lg'[10]*'pvalue>=(2/lg'[2]*'FC)'))),pch = 16, col=c("red", "blue"))
+
+# Draw lines -------------------------------------------------------------------
+xpos <- seq(0, 2.5, 0.01)
+xneg <- seq(-2.5, 0, 0.01)
+points(xpos, 2/xpos, type="l")
+points(xneg, -2/xneg, type="l")
+
+# Save down-regulated genes ----------------------------------------------------
+GSE_DOWN <- subset(GSE, logFC < 0 & -log10(PValue)>=(2/-logFC) , select=c(logFC, PValue))
+GSE_DOWN <- GSE_DOWN[order(GSE_DOWN$logFC), ]
+nrow(GSE_DOWN)
+GSE_DOWN$GeneName <- rownames(GSE_DOWN)
+GSE_DOWN <- GSE_DOWN[, c(3, 1:2)]
+head(GSE_DOWN)
+write.table(GSE_DOWN, "/Users/mac/OneDrive - Cancer Research Malaysia/Kuepeng/2020/New_targets/TCGA_HNSCC/_Working_Copy/Output/TCGA_HNSCC_LateStage_vs_EarlyStage_DOWN.txt", quote = FALSE, sep = '\t', row.names = FALSE)
+
+# Save up-regulated genes ------------------------------------------------------
+GSE_UP <- subset(GSE, logFC > 0 & -log10(PValue)>=(2/logFC) , select=c(logFC, PValue))
+GSE_UP <- GSE_UP[order(GSE_UP$logFC, decreasing = TRUE), ]
+nrow(GSE_UP)
+GSE_UP$GeneName <- rownames(GSE_UP)
+GSE_UP <- GSE_UP[, c(3, 1:2)]
+head(GSE_UP)
+write.table(GSE_UP, "/Users/mac/OneDrive - Cancer Research Malaysia/Kuepeng/2020/New_targets/TCGA_HNSCC/_Working_Copy/Output/TCGA_HNSCC_LateStage_vs_EarlyStage_UP.txt", quote = FALSE, sep = '\t', row.names = FALSE)
+```
+
+#### Session information
+```{r}
+sessionInfo()
+```
+
+
