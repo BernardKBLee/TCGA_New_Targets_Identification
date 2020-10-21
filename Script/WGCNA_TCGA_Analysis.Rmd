@@ -42,6 +42,7 @@ text(sft$fitIndices[, 1], -sign(sft$fitIndices[, 3]) * sft$fitIndices[,2], label
 abline(h = 0.90, col = "red")
 
 # calculation of adjacency matrix
+# Change the value of beta accordingly to the soft threshold power
 beta <- 5
 a <- s^beta
 
@@ -51,7 +52,44 @@ w <- 1 - a
 
 #### Step 3: Identification of co-expression modules
 ```{r}
+# Create gene tree by average linkage hierarchical clustering
+geneTree <- hclust(as.dist(w), method = "average")
 
+# Module identification using dynamic tree cut algorithm
+modules <- cutreeDynamic(dendro = geneTree, distM = w, deepSplit = 4, pamRespectsDendro = FALSE, minClusterSize = 30)
+
+# Assign module colours
+module.colours <- labels2colors(modules)
+
+# Plot the dendrogram and corresponding colour bars underneath
+plotDendroAndColors(geneTree, module.colours, "Module colours", dendroLabels = FALSE, hang = 0.03, addGuide = TRUE, guideHang = 0.05, main = "")
+
+library(ape)
+
+# Calculate eigen genes
+MEs <- moduleEigengenes(WGCNA_matrix, colors = module.colours, excludeGrey = FALSE)$eigengenes
+
+# Calculate dissimilarity pf module genes
+MEDiss <- 1 - cor(MEs)
+
+# Cluster module eigengenes
+METree <- hclust(as.dist(MEDiss), method = "average")
+
+# Plot the result with phytools package
+par(mar = c(2, 2, 2, 2))
+plot.phylo(as.phylo(METree), type = "fan", show.tip.label = FALSE, main = "")
+tiplabels(frame = "circle", col = "black", text = rep("", length(unique(modules))), bg = levels(as.factor(module.colours)))
+```
+
+#### Step 4: Relation of co-expression modules to sample traits
+```{r}
+
+```
+
+
+#### Session info
+```{r}
+sessionInfo()
 ```
 
 
